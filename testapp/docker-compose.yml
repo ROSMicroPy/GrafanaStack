@@ -1,0 +1,27 @@
+
+name: obfw-testapp
+
+services:
+
+  testapp: 
+    build: ./testapp
+    image: testapp.img
+    tty: true
+    container_name: testapp
+    hostname: testapp
+    environment:
+      # Base OTLP endpoint for gRPC protocol
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:40317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      # Specific endpoints for traces, metrics, and logs
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:40317
+      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:40317
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:40317
+    network_mode: "host"
+#    networks: host
+#    ports:
+#      - "0.0.0.0:8080:8080"
+#      - "0.0.0.0:9090:9090"
+
+    

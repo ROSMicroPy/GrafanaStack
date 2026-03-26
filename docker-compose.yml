@@ -1,0 +1,123 @@
+networks:
+  network1:
+    name: observe
+
+name: OTEL
+
+services:
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    profiles: ["dev"] # Service included in this profile
+
+    cap_add:
+      - sys_ptrace                          # Only here to help testing
+      - net_admin                           # Allow NFT, used by AutoBan
+      - net_raw                             # Allow NFT, used by AutoBan
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy 
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+
+        - name: Mimir
+          uid: "mimir"
+          type: prometheus
+          access: proxy
+          url: http://mimir:9009/prometheus
+          isDefault: false
+          jsonData:
+            httpMethod: "POST"
+            prometheusType: "Mimir"
+            prometheusVersion: "2.9.1"
+            tlsSkipVerify: true
+            timeout: 30
+
+        - name: Tempo
+          type: tempo
+          uid: EbPG8fYoz
+          url: http://tempo:3200
+          access: proxy
+          basicAuth: false
+        EOF
+        /run.sh
+    ports:
+      - "3000:3000"
+    networks:
+      - network1
+
+  mimir:
+    profiles: [dev]
+    tty: true
+    container_name: mimir
+    build: ./mimir
+    image: mimir.img
+    hostname: mimir
+#    ports:
+#      - 0.0.0.0:9009:9009 
+    #command: -config.file /etc/mimir/mimir-config.yml
+    networks:
+      - network1
+
+  tempo:
+    profiles: [dev]
+    tty: true
+    container_name: tempo
+    build: ./tempo
+    image: tempo.img
+    hostname: tempo
+    ports:
+      - "5317:5317"
+    #privileged: true  #tempo used systemd which requires privileged access
+
+#    command: --config.file /etc/tempo/config.yml
+    networks:
+      - network1
+
+  loki:
+    profiles: [dev]
+    container_name: loki
+    image: grafana/loki:3.3.0
+    hostname: loki
+#    ports:
+#      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - network1
+
+
+  otelcol: 
+   profiles: [dev]
+   tty: true
+   container_name: otelcol
+   build: 
+    context: ./otelcol
+    dockerfile: Dockerfile
+    args:
+      - OTELCOL_CONFIG_PATH=./assets/dev
+   image: otelcol.img
+   hostname: otelcol
+   networks:
+    - network1
+   ports:
+    - "0.0.0.0:4317:4317"
+    - "0.0.0.0:4318:4318"
+   command: "/bin/otelcol-contrib --config=/etc/otelcol/config.yaml"
+

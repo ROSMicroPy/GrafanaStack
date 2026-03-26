@@ -1,0 +1,1 @@
+/usr/bin/tempo -config.file /etc/tempo/config.yml
