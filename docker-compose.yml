@@ -8,8 +8,9 @@ services:
 
   grafana:
     container_name: grafana
-    image: grafana/grafana:latest
-    profiles: ["dev"] # Service included in this profile
+    # Avoid pulling whatever Grafana publishes next; unpinned upgrades have
+    # already caused frontend/runtime regressions in Explore.
+    image: grafana/grafana:11.6.0
 
     cap_add:
       - sys_ptrace                          # Only here to help testing
@@ -64,7 +65,6 @@ services:
       - network1
 
   mimir:
-    profiles: [dev]
     tty: true
     container_name: mimir
     build: ./mimir
@@ -77,14 +77,11 @@ services:
       - network1
 
   tempo:
-    profiles: [dev]
     tty: true
     container_name: tempo
     build: ./tempo
     image: tempo.img
     hostname: tempo
-    ports:
-      - "5317:5317"
     #privileged: true  #tempo used systemd which requires privileged access
 
 #    command: --config.file /etc/tempo/config.yml
@@ -92,10 +89,11 @@ services:
       - network1
 
   loki:
-    profiles: [dev]
     container_name: loki
     image: grafana/loki:3.3.0
     hostname: loki
+    volumes:
+      - ./loki/assets/local-config.yaml:/etc/loki/local-config.yaml:ro
 #    ports:
 #      - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
@@ -104,7 +102,6 @@ services:
 
 
   otelcol: 
-   profiles: [dev]
    tty: true
    container_name: otelcol
    build: 
@@ -114,10 +111,15 @@ services:
       - OTELCOL_CONFIG_PATH=./assets/dev
    image: otelcol.img
    hostname: otelcol
+   depends_on:
+    - loki
+    - mimir
+    - tempo
    networks:
     - network1
    ports:
     - "0.0.0.0:4317:4317"
     - "0.0.0.0:4318:4318"
-   command: "/bin/otelcol-contrib --config=/etc/otelcol/config.yaml"
+    - "55679:55679"
 
+   command: "/bin/otelcol-contrib --config=/etc/otelcol/config.yaml"

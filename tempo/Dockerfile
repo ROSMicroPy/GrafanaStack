@@ -1,6 +1,6 @@
 #FROM grafana/tempo:latest
 FROM ubuntu:22.04
-ARG TEMPO_VER=2.6.1
+ARG TEMPO_VER=2.10.5
 
 RUN mkdir -p /etc/tempo
 
