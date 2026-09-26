@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Run a local OpenTelemetry stack with Grafana, Loki, Mimir, and Tempo. Setup, sample telemetry, and troubleshooting for GrafanaStack.">
+  <title>GrafanaStack · Project guide</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header>
+    <a class="brand" href="#overview">GrafanaStack<span> / project guide</span></a>
+    <a href="https://github.com/ROSMicroPy/GrafanaStack">Source on GitHub ↗</a>
+  </header>
+  <div class="layout">
+    <nav aria-label="Guide sections">
+      <p class="eyebrow">In this guide</p>
+      <a href="#overview">Overview</a>
+      <a href="#quickstart">Start the stack</a>
+      <a href="#telemetry">Send telemetry</a>
+      <a href="#explore">Explore your data</a>
+      <a href="#configuration">Configuration</a>
+      <a href="#troubleshooting">Troubleshooting</a>
+      <a href="#publishing">Publish this guide</a>
+    </nav>
+    <main id="main">
+      <section id="overview" class="hero">
+        <p class="eyebrow">OpenTelemetry • Docker Compose • Grafana</p>
+        <h1>One playground.<br>Three signals.</h1>
+        <p class="lead">Bring logs, metrics, and traces together in a local observability stack. Send OpenTelemetry data, follow a request, and learn how the pieces connect.</p>
+        <a class="button" href="#quickstart">Start the stack <span aria-hidden="true">→</span></a>
+        <div class="flow" role="img" aria-label="Applications send OTLP to the Collector, which routes logs to Loki, metrics to Mimir, and traces to Tempo. Grafana queries all three.">
+          <div>Applications <span>OTLP / gRPC or HTTP</span></div>
+          <b aria-hidden="true">↓</b>
+          <div>OpenTelemetry Collector <span>Receive → batch → export</span></div>
+          <b aria-hidden="true">↓</b>
+          <div class="signals"><div>Loki<span>Logs</span></div><div>Mimir<span>Metrics</span></div><div>Tempo<span>Traces</span></div></div>
+          <b aria-hidden="true">↓</b>
+          <div>Grafana <span>Explore all three signals</span></div>
+        </div>
+        <p>Compose provisions the Loki, Mimir, and Tempo data sources automatically. The repository also includes a Flask dice app, a read-only Grafana MCP service, and Tempo's built-in MCP server.</p>
+        <aside><strong>Built for local development.</strong> Grafana allows anonymous Admin access and uses <code>admin / admin</code> credentials. Published ports bind beyond localhost by default. Backends use local container storage without persistent host volumes, so container removal or recreation can lose data. Use a trusted development machine.</aside>
+      </section>
+
+      <section id="quickstart">
+        <p class="eyebrow">01 / Setup</p>
+        <h2>Start the stack</h2>
+        <p>You need Docker Engine or Docker Desktop with Compose v2, Git, and internet access to pull images and build packages. Custom Collector and Tempo builds select Linux amd64 or arm64 packages. Run these commands from the repository root.</p>
+        <pre><code>git clone https://github.com/ROSMicroPy/GrafanaStack.git
+cd GrafanaStack
+
+# Compose expects this shared external network to exist.
+docker network inspect observe &gt;/dev/null 2&gt;&amp;1 || docker network create observe
+docker compose up -d --build
+docker compose ps</code></pre>
+        <p>Open <a href="http://localhost:3000">Grafana at localhost:3000</a>. Sign in with <code>admin</code> / <code>admin</code> if prompted. Services can take a little longer to become ready after their containers start.</p>
+        <div class="table-wrap"><table>
+          <caption>Endpoints provided by the root Compose stack</caption>
+          <thead><tr><th>Service</th><th>From your host</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>Grafana</td><td><code>localhost:3000</code></td><td>UI and provisioned data sources</td></tr>
+            <tr><td>Collector</td><td><code>localhost:4317</code></td><td>OTLP over gRPC</td></tr>
+            <tr><td>Collector</td><td><code>localhost:4318</code></td><td>OTLP over HTTP</td></tr>
+            <tr><td>Collector zPages</td><td><code>localhost:55679</code></td><td>Collector diagnostics</td></tr>
+            <tr><td>Grafana MCP</td><td><code>http://localhost:8000/mcp</code></td><td>Streamable HTTP; writes disabled</td></tr>
+            <tr><td>Tempo</td><td><code>localhost:3200</code></td><td>Query API and built-in MCP server</td></tr>
+          </tbody>
+        </table></div>
+        <p>Loki (<code>loki:3100</code>) and Mimir (<code>mimir:9009</code>) are internal to the <code>observe</code> Docker network. Grafana reaches them directly.</p>
+        <h3>Stop or rebuild</h3>
+        <pre><code># Stop without removing containers.
+docker compose stop
+docker compose start
+
+# Rebuild after changing a configuration copied into an image.
+docker compose up -d --build otelcol mimir tempo
+
+# Remove the stack containers; stored telemetry may be lost.
+docker compose down</code></pre>
+        <p>The external <code>observe</code> network remains after <code>down</code>.</p>
+      </section>
+
+      <section id="telemetry">
+        <p class="eyebrow">02 / Instrument</p>
+        <h2>Send telemetry</h2>
+        <h3>Connect your own application</h3>
+        <p>For an application running on your host, configure an OpenTelemetry SDK or auto-instrumentation agent with these environment variables. Environment variables alone do not instrument an application.</p>
+        <pre><code>export OTEL_SERVICE_NAME=my-service
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_INSECURE=true</code></pre>
+        <p>For OTLP/HTTP, use <code>http://localhost:4318</code> with protocol <code>http/protobuf</code>. Signal-specific HTTP endpoints use <code>/v1/traces</code>, <code>/v1/metrics</code>, and <code>/v1/logs</code>. Containers attached to <code>observe</code> should use <code>otelcol</code> instead of <code>localhost</code>.</p>
+        <h3>Try the included dice app</h3>
+        <p>The frontend serves <code>/roll</code> on port 8080 and calls the backend's <code>/roll-dice</code> on port 9090. Both processes run in one container.</p>
+        <aside>The sample <code>testapp/docker-compose.yml</code> currently targets <code>localhost:40317</code> and the image defaults to Bash. The commands below connect directly to the stack on port <code>4317</code> and explicitly start both application processes.</aside>
+        <pre><code># Run from the repository root after starting the stack.
+docker build -t testapp.img ./testapp/testapp
+docker run --rm --name grafanastack-dice --network observe \
+  -p 127.0.0.1:8080:8080 \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317 \
+  -e OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
+  -e OTEL_EXPORTER_OTLP_INSECURE=true \
+  testapp.img bash -c 'bash run_BE_App.sh &amp; bash run_FE_App.sh &amp; wait -n'</code></pre>
+        <p>Leave that terminal running. In another terminal, generate requests:</p>
+        <pre><code>curl http://localhost:8080/roll
+for i in $(seq 1 10); do curl http://localhost:8080/roll; echo; done
+
+# Stop the sample when finished.
+docker stop grafanastack-dice</code></pre>
+        <p>The sample mixes Python auto-instrumentation and explicit SDK setup, which can produce provider or duplicate-instrumentation warnings. Launcher service names are <code>dice-fe-server</code> and <code>dice-be-server</code>; the Python code also declares <code>frontend-service</code> and <code>backend-service</code>. Discover the actual service names in Explore. The explicit custom counter uses a console metric exporter, so do not assume that counter is present in Mimir.</p>
+      </section>
+
+      <section id="explore">
+        <p class="eyebrow">03 / Investigate</p>
+        <h2>Explore your data</h2>
+        <p>In Grafana, open <strong>Explore</strong>, choose a data source, and set the time range to the last 15 minutes. Send a few requests before searching; a fresh stack has no application data.</p>
+        <div class="cards">
+          <article><h3>Logs → Loki</h3><p>Use the label browser to discover <code>service_name</code> values. For an application named <code>my-service</code>, try:</p><pre><code>{service_name="my-service"}</code></pre><p>Loki indexes selected resource attributes, including service name, namespace, environment, and node role. Dots in label names become underscores.</p></article>
+          <article><h3>Metrics → Mimir</h3><p>Use the metrics browser to find ingested metrics, then build a PromQL query. Names depend on your SDK and emitted instruments.</p><p>This Collector receives OTLP metrics; it does not configure Prometheus scraping. An <code>up</code> query is not a reliable stack health check here.</p></article>
+          <article><h3>Traces → Tempo</h3><p>Use Search to select a service, or start with this TraceQL query:</p><pre><code>{ resource.service.name = "my-service" }</code></pre><p>Open a trace to inspect spans and timings. Allow a short ingestion delay before retrying a search.</p></article>
+        </div>
+        <h3>Query with an MCP client</h3>
+        <p>The Grafana MCP service exposes datasource, Prometheus, Loki, and proxied tools with writes disabled. Configure your client's Streamable HTTP connection to <code>http://localhost:8000/mcp</code>. Tempo has its own MCP server enabled on its query frontend. Client setup varies; consult the client's MCP documentation.</p>
+        <p>For agents working in this repository, <code>AGENTS.md</code> directs log and metric queries to <code>grafana-observability</code> and trace queries to <code>tempo-observability</code>. These are client-side server names, not Docker service names.</p>
+      </section>
+
+      <section id="configuration">
+        <p class="eyebrow">04 / Customize</p>
+        <h2>Know the configuration</h2>
+        <div class="table-wrap"><table>
+          <caption>Paths relative to the repository root</caption>
+          <thead><tr><th>File</th><th>Controls</th></tr></thead>
+          <tbody>
+            <tr><td><code>docker-compose.yml</code></td><td>Services, ports, network, credentials, and Grafana data source provisioning</td></tr>
+            <tr><td><code>otelcol/assets/dev/config.yaml</code></td><td>OTLP receivers, batching, backend exporters, and detailed debug output</td></tr>
+            <tr><td><code>loki/assets/local-config.yaml</code></td><td>Local TSDB storage and OTLP resource labels; mounted read-only</td></tr>
+            <tr><td><code>mimir/assets/mimir-config.yaml</code></td><td>Single-instance metrics storage; multitenancy disabled</td></tr>
+            <tr><td><code>tempo/assets/config.yml</code></td><td>Trace receivers, local storage, 30-day retention, and MCP</td></tr>
+            <tr><td><code>testapp/testapp/assets/</code></td><td>Flask frontend/backend and instrumentation launch scripts</td></tr>
+          </tbody>
+        </table></div>
+        <p>Collector, Mimir, and Tempo configuration files are copied during image builds. Rebuild the corresponding service after edits. Loki's configuration is bind-mounted; restart Loki after editing it. Grafana provisioning is generated by its Compose entrypoint; recreate Grafana after changing that configuration.</p>
+        <p>The repository pins Grafana to 11.6.0, Loki to 3.3.0, Collector to 0.135.0, and Tempo to 2.10.5. Mimir is installed from the Grafana apt repository without a version pin; the Grafana MCP image uses <code>latest</code>. Rebuilds or pulls can therefore change those components.</p>
+      </section>
+
+      <section id="troubleshooting">
+        <p class="eyebrow">05 / Troubleshoot</p>
+        <h2>When something is missing</h2>
+        <dl>
+          <dt>“Network observe declared as external, but could not be found”</dt><dd>Create it with <code>docker network create observe</code>, then run Compose again.</dd>
+          <dt>A container starts, but telemetry does not arrive</dt><dd>Startup ordering does not guarantee readiness. Verify the app's endpoint and protocol, check <code>docker compose ps</code>, and inspect <code>docker compose logs --tail=100 otelcol tempo mimir loki</code>. The Collector's detailed debug exporter can show whether telemetry reached its pipelines.</dd>
+          <dt>The sample app cannot connect</dt><dd>The sample Compose file uses port 40317; this stack publishes 4317. Signal-specific endpoint variables override the general endpoint, so update all of them if using that file. The direct Docker command above avoids those defaults.</dd>
+          <dt>Grafana shows no results</dt><dd>Check the selected data source, time range, and actual service labels. Verify the application exports the signal you are looking for. Backend storage is not persisted outside the containers.</dd>
+          <dt>Tempo service graphs or generated metrics fail</dt><dd>The current metrics generator remote-write URL is <code>http://prometheus:9090/api/v1/write</code>, but this Compose stack has no <code>prometheus</code> service. Configure a valid metrics destination before relying on service graphs or span metrics. This is separate from the Collector's OTLP metrics route to Mimir.</dd>
+          <dt>A configuration edit has no effect</dt><dd>Rebuild services whose configuration is copied into an image, or restart Loki for its mounted configuration. Run Compose from the repository root.</dd>
+          <dt>A published port is already allocated</dt><dd>Stop the conflicting process or change the host side of the port mapping in Compose. Update application endpoints to match.</dd>
+        </dl>
+      </section>
+
+      <section id="publishing">
+        <p class="eyebrow">06 / Documentation</p>
+        <h2>Publish this guide</h2>
+        <p>This site lives in <code>pages/</code> and uses plain HTML and CSS. To preview edits locally:</p>
+        <pre><code>python3 -m http.server 8088 --directory pages</code></pre>
+        <p>Open <a href="http://localhost:8088">localhost:8088</a>. Relative asset links support both this preview and GitHub project Pages.</p>
+        <ol>
+          <li>In GitHub repository settings, open <strong>Pages → Build and deployment</strong> and select <strong>GitHub Actions</strong> as the source. This requires repository administration access.</li>
+          <li>Commit and push to <code>main</code>. The <code>.github/workflows/pages.yml</code> workflow uploads only <code>pages/</code> and deploys it to the <code>github-pages</code> environment.</li>
+          <li>Find the published URL in the workflow deployment or repository Pages settings. To republish manually, run <strong>Deploy project guide</strong> from the Actions tab on <code>main</code>.</li>
+        </ol>
+        <p>Every push to <code>main</code> republishes the checked-in guide. Update the documentation when you change the stack; prose is maintained manually. Feature branches do not deploy. No custom deployment secret is required: the workflow uses GitHub's token and Pages permissions.</p>
+        <p>For setup details, see <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages">GitHub's custom Pages workflow documentation</a>.</p>
+      </section>
+      <footer>GrafanaStack · A local observability playground · <a href="https://github.com/ROSMicroPy/GrafanaStack">Browse the source</a></footer>
+    </main>
+  </div>
+</body>
+</html>
